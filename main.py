@@ -11,6 +11,7 @@ from gradio_client import Client, handle_file
 from dotenv import load_dotenv
 from supabase import create_client, Client as SupabaseClient
 import uvicorn
+from PIL import Image, ImageEnhance, ImageFilter
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -69,6 +70,58 @@ async def health_check():
         "supabase_ready": supabase is not None
     }
 
+def enhance_image_quality(image_path: str) -> str:
+    """
+    Enhance image quality using PIL/Pillow
+    Returns path to enhanced image
+    """
+    try:
+        logger.info(f"Enhancing image quality: {image_path}")
+        
+        # Open the image
+        img = Image.open(image_path)
+        
+        # Convert to RGB if necessary
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # 1. Upscale image using high-quality Lanczos resampling
+        original_size = img.size
+        upscale_factor = 1.5  # Upscale by 1.5x
+        new_size = (int(original_size[0] * upscale_factor), int(original_size[1] * upscale_factor))
+        img = img.resize(new_size, Image.LANCZOS)
+        logger.info(f"Upscaled image from {original_size} to {new_size}")
+        
+        # 2. Enhance sharpness
+        enhancer = ImageEnhance.Sharpness(img)
+        img = enhancer.enhance(1.3)  # Increase sharpness by 30%
+        
+        # 3. Enhance contrast slightly
+        enhancer = ImageEnhance.Contrast(img)
+        img = enhancer.enhance(1.1)  # Increase contrast by 10%
+        
+        # 4. Enhance color saturation
+        enhancer = ImageEnhance.Color(img)
+        img = enhancer.enhance(1.15)  # Increase saturation by 15%
+        
+        # 5. Apply subtle unsharp mask for better detail
+        img = img.filter(ImageFilter.UnsharpMask(radius=2, percent=150, threshold=3))
+        
+        # Save enhanced image with high quality
+        enhanced_path = str(Path(image_path).parent / f"enhanced_{Path(image_path).name}")
+        enhanced_path = enhanced_path.replace('.jpg', '.png').replace('.jpeg', '.png')
+        
+        # Save as PNG with maximum quality (lossless)
+        img.save(enhanced_path, 'PNG', optimize=True, compress_level=1)
+        
+        logger.info(f"Enhanced image saved to: {enhanced_path}")
+        return enhanced_path
+        
+    except Exception as e:
+        logger.error(f"Failed to enhance image: {e}")
+        # Return original path if enhancement fails
+        return image_path
+
 @app.post("/generate/")
 async def generate_image(
     file: UploadFile = File(...),
@@ -77,6 +130,7 @@ async def generate_image(
     """Generate Ghibli-style image from input image and save to Supabase"""
     temp_input_path = None
     temp_generated_path = None
+    temp_enhanced_path = None
 
     try:
         # Improved image validation
@@ -128,7 +182,7 @@ async def generate_image(
         if supabase is None:
             raise HTTPException(status_code=503, detail="Storage service not available")
 
-        # Generate Ghibli-style image
+        # Generate Ghibli-style image with higher resolution
         logger.info("Generating Ghibli-style image...")
         generated_result = await asyncio.wait_for(
             asyncio.to_thread(_predict_ghibli, str(temp_input_path)),
@@ -142,8 +196,12 @@ async def generate_image(
         generated_image_path = generated_result.get("path") if isinstance(generated_result, dict) else generated_result
         logger.info(f"Ghibli image generated: {generated_image_path}")
 
-        # Upload generated image to Supabase avatars bucket
-        avatar_url = await _upload_avatar_to_supabase(generated_image_path, uid)
+        # Enhance image quality before uploading
+        temp_enhanced_path = await asyncio.to_thread(enhance_image_quality, generated_image_path)
+        logger.info(f"Image quality enhanced: {temp_enhanced_path}")
+
+        # Upload enhanced image to Supabase avatars bucket
+        avatar_url = await _upload_avatar_to_supabase(temp_enhanced_path, uid)
         logger.info(f"Avatar uploaded to Supabase: {avatar_url}")
 
         # Save dpurl to Firestore
@@ -175,7 +233,7 @@ async def generate_image(
 
     finally:
         # Cleanup temporary files
-        for temp_path in [temp_input_path, temp_generated_path]:
+        for temp_path in [temp_input_path, temp_generated_path, temp_enhanced_path]:
             if temp_path and Path(temp_path).exists():
                 try:
                     Path(temp_path).unlink()
@@ -270,13 +328,13 @@ async def _save_dpurl_to_firestore(uid: str, dpurl: str):
         # Just log the error and continue
 
 def _predict_ghibli(image_path: str):
-    """Synchronous function to call the Ghibli Gradio client"""
+    """Synchronous function to call the Ghibli Gradio client with higher resolution"""
     try:
         return ghibli_client.predict(
             prompt="Ghibli Studio style, Charming hand-drawn anime-style illustration",
             spatial_img=handle_file(image_path),
-            height=768,
-            width=768,
+            height=1024,  # Increased from 768
+            width=1024,   # Increased from 768
             seed=42,
             control_type="Ghibli",
             api_name="/single_condition_generate_image"
