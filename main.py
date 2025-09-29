@@ -55,7 +55,7 @@ async def startup_event():
         logger.info("Ghibli Gradio client initialized successfully")
 
         logger.info("Initializing Upscaler Gradio client...")
-        upscaler_client = Client("https://themaisk-themaisk-image-upscaler.hf.space/")
+        upscaler_client = Client("themaisk/themaisk-image-upscaler", hf_token=HF_TOKEN)
         logger.info("Upscaler Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
