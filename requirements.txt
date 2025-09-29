@@ -7,7 +7,7 @@ firebase-admin
 flask
 requests
 supabase
-Pillow==10.1.0
+Pillow
 pytz
 
 
