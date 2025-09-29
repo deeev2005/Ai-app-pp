@@ -43,20 +43,15 @@ app.add_middleware(
 
 # Global clients
 ghibli_client = None
-upscaler_client = None
 supabase: SupabaseClient = None
 
 @app.on_event("startup")
 async def startup_event():
-    global ghibli_client, upscaler_client, supabase
+    global ghibli_client, supabase
     try:
         logger.info("Initializing Ghibli Gradio client...")
         ghibli_client = Client("Han-123/EasyControl_Ghibli", hf_token=HF_TOKEN)
         logger.info("Ghibli Gradio client initialized successfully")
-
-        logger.info("Initializing Upscaler Gradio client...")
-        upscaler_client = Client("walidadebayo/Ilaria_Upscaler")
-        logger.info("Upscaler Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -71,7 +66,6 @@ async def health_check():
     return {
         "status": "healthy", 
         "ghibli_client_ready": ghibli_client is not None,
-        "upscaler_client_ready": upscaler_client is not None,
         "supabase_ready": supabase is not None
     }
 
@@ -80,10 +74,9 @@ async def generate_image(
     file: UploadFile = File(...),
     uid: str = Form(...)
 ):
-    """Generate Ghibli-style image from input image, upscale it, and save to Supabase"""
+    """Generate Ghibli-style image from input image and save to Supabase"""
     temp_input_path = None
     temp_generated_path = None
-    temp_upscaled_path = None
 
     try:
         # Improved image validation
@@ -131,14 +124,11 @@ async def generate_image(
         # Check if clients are available
         if ghibli_client is None:
             raise HTTPException(status_code=503, detail="AI image generation service not available")
-        
-        if upscaler_client is None:
-            raise HTTPException(status_code=503, detail="AI upscaler service not available")
 
         if supabase is None:
             raise HTTPException(status_code=503, detail="Storage service not available")
 
-        # Step 1: Generate Ghibli-style image
+        # Generate Ghibli-style image
         logger.info("Generating Ghibli-style image...")
         generated_result = await asyncio.wait_for(
             asyncio.to_thread(_predict_ghibli, str(temp_input_path)),
@@ -152,23 +142,11 @@ async def generate_image(
         generated_image_path = generated_result.get("path") if isinstance(generated_result, dict) else generated_result
         logger.info(f"Ghibli image generated: {generated_image_path}")
 
-        # Step 2: Upscale the generated image
-        logger.info("Upscaling generated image...")
-        upscaled_result = await asyncio.wait_for(
-            asyncio.to_thread(_predict_upscale, generated_image_path),
-            timeout=300.0  # 5 minutes timeout
-        )
-
-        if not upscaled_result:
-            raise HTTPException(status_code=500, detail="Invalid response from upscaler AI model")
-
-        logger.info(f"Image upscaled: {upscaled_result}")
-
-        # Step 3: Upload upscaled image to Supabase avatars bucket
-        avatar_url = await _upload_avatar_to_supabase(upscaled_result, uid)
+        # Upload generated image to Supabase avatars bucket
+        avatar_url = await _upload_avatar_to_supabase(generated_image_path, uid)
         logger.info(f"Avatar uploaded to Supabase: {avatar_url}")
 
-        # Step 4: Save dpurl to Firestore
+        # Save dpurl to Firestore
         await _save_dpurl_to_firestore(uid, avatar_url)
 
         return JSONResponse({
@@ -178,10 +156,10 @@ async def generate_image(
         })
 
     except asyncio.TimeoutError:
-        logger.error("Image generation/upscaling timed out after 5 minutes")
+        logger.error("Image generation timed out after 5 minutes")
         raise HTTPException(
             status_code=408, 
-            detail="Image generation/upscaling timed out. Please try again."
+            detail="Image generation timed out. Please try again."
         )
 
     except HTTPException:
@@ -197,7 +175,7 @@ async def generate_image(
 
     finally:
         # Cleanup temporary files
-        for temp_path in [temp_input_path, temp_generated_path, temp_upscaled_path]:
+        for temp_path in [temp_input_path, temp_generated_path]:
             if temp_path and Path(temp_path).exists():
                 try:
                     Path(temp_path).unlink()
@@ -305,29 +283,6 @@ def _predict_ghibli(image_path: str):
         )
     except Exception as e:
         logger.error(f"Ghibli Gradio client prediction failed: {e}")
-        raise
-
-def _predict_upscale(image_path: str):
-    """Synchronous function to call the Upscaler Gradio client"""
-    try:
-        logger.info(f"Upscaling image: {image_path}")
-        
-        # Use api_name="/realesrgan" with RealESRGAN_x4plus_anime_6B model
-        result = upscaler_client.predict(
-            img=handle_file(image_path),  # Input image
-            model_name="RealESRGAN_x4plus_anime_6B",  # Upscaler model (anime 6B)
-            denoise_strength=0.5,  # Denoise Strength
-            face_enhance=True,  # Face Enhancement (GFPGAN)
-            outscale=4,  # Resolution upscale
-            api_name="/realesrgan"
-        )
-        
-        logger.info(f"Upscaling result: {result}")
-        # The result is a tuple, first element is the upscaled image
-        return result[0]  # Return the upscaled image path (first element of tuple)
-        
-    except Exception as e:
-        logger.error(f"Upscaler Gradio client prediction failed: {e}")
         raise
 
 @app.exception_handler(Exception)
