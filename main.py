@@ -55,7 +55,7 @@ async def startup_event():
         logger.info("Ghibli Gradio client initialized successfully")
 
         logger.info("Initializing Upscaler Gradio client...")
-        upscaler_client = Client("themaisk/themaisk-image-upscaler", hf_token=HF_TOKEN)
+        upscaler_client = Client("walidadebayo/Ilaria_Upscaler")
         logger.info("Upscaler Gradio client initialized successfully")
         
         logger.info("Initializing Supabase client...")
@@ -312,18 +312,19 @@ def _predict_upscale(image_path: str):
     try:
         logger.info(f"Upscaling image: {image_path}")
         
-        # Use fn_index=1 with RealESRGAN_x4plus_anime_6B model
+        # Use api_name="/realesrgan" with RealESRGAN_x4plus_anime_6B model
         result = upscaler_client.predict(
-            image_path,  # Input image
-            "RealESRGAN_x4plus_anime_6B",  # Upscaler model (anime 6B)
-            0,  # Denoise Strength
-            True,  # Face Enhancement (GFPGAN)
-            1,  # Resolution upscale
-            fn_index=1
+            img=handle_file(image_path),  # Input image
+            model_name="RealESRGAN_x4plus_anime_6B",  # Upscaler model (anime 6B)
+            denoise_strength=0.5,  # Denoise Strength
+            face_enhance=True,  # Face Enhancement (GFPGAN)
+            outscale=4,  # Resolution upscale
+            api_name="/realesrgan"
         )
         
         logger.info(f"Upscaling result: {result}")
-        return result  # Return the upscaled image path
+        # The result is a tuple, first element is the upscaled image
+        return result[0]  # Return the upscaled image path (first element of tuple)
         
     except Exception as e:
         logger.error(f"Upscaler Gradio client prediction failed: {e}")
