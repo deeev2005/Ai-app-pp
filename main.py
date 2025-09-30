@@ -134,11 +134,9 @@ async def generate_image(
 
     try:
         # Check if uid has (c) appended and remove it
-        is_cover_photo = False
         if uid.endswith("(c)"):
-            is_cover_photo = True
             uid = uid[:-3]  # Remove last 3 characters "(c)"
-            logger.info(f"Detected cover photo request. Cleaned UID: {uid}")
+            logger.info(f"Cleaned UID: {uid}")
 
         # Improved image validation
         content_type = file.content_type or ""
@@ -211,11 +209,8 @@ async def generate_image(
         avatar_url = await _upload_avatar_to_supabase(temp_enhanced_path, uid)
         logger.info(f"Avatar uploaded to Supabase: {avatar_url}")
 
-        # Save dpurl to Firestore (only for non-cover photos)
-        if not is_cover_photo:
-            await _save_dpurl_to_firestore(uid, avatar_url)
-        else:
-            logger.info(f"Skipping Firestore update for cover photo (uid: {uid})")
+        # Save dpurl to Firestore - ALWAYS UPDATE
+        await _save_dpurl_to_firestore(uid, avatar_url)
 
         return JSONResponse({
             "success": True,
