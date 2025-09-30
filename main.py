@@ -250,7 +250,7 @@ async def _upload_avatar_to_supabase(local_image_path: str, uid: str) -> str:
 
         # Generate unique filename for Supabase storage
         image_id = str(uuid.uuid4())
-        storage_path = f"{uid}/{image_id}.png"
+        storage_path = f"avatars/{uid}/{image_id}.png"  # Changed to include avatars folder
 
         # Read image file
         with open(image_path, "rb") as image_file:
