@@ -133,6 +133,13 @@ async def generate_image(
     temp_enhanced_path = None
 
     try:
+        # Check if uid has (c) appended and remove it
+        is_cover_photo = False
+        if uid.endswith("(c)"):
+            is_cover_photo = True
+            uid = uid[:-3]  # Remove last 3 characters "(c)"
+            logger.info(f"Detected cover photo request. Cleaned UID: {uid}")
+
         # Improved image validation
         content_type = file.content_type or ""
         filename = file.filename or ""
@@ -204,8 +211,11 @@ async def generate_image(
         avatar_url = await _upload_avatar_to_supabase(temp_enhanced_path, uid)
         logger.info(f"Avatar uploaded to Supabase: {avatar_url}")
 
-        # Save dpurl to Firestore
-        await _save_dpurl_to_firestore(uid, avatar_url)
+        # Save dpurl to Firestore (only for non-cover photos)
+        if not is_cover_photo:
+            await _save_dpurl_to_firestore(uid, avatar_url)
+        else:
+            logger.info(f"Skipping Firestore update for cover photo (uid: {uid})")
 
         return JSONResponse({
             "success": True,
@@ -293,7 +303,7 @@ async def _upload_avatar_to_supabase(local_image_path: str, uid: str) -> str:
         raise Exception(f"Storage upload failed: {str(e)}")
 
 async def _save_dpurl_to_firestore(uid: str, dpurl: str):
-    """Save dpurl to Firestore user document"""
+    """Update dpurl in Firestore user document (replaces old URL)"""
     try:
         import firebase_admin
         from firebase_admin import credentials, firestore
@@ -310,20 +320,20 @@ async def _save_dpurl_to_firestore(uid: str, dpurl: str):
 
         db = firestore.client()
 
-        logger.info(f"Saving dpurl to Firestore for user: {uid}")
+        logger.info(f"Updating dpurl in Firestore for user: {uid}")
 
-        # Update user document with dpurl
+        # Update user document with new dpurl (replaces old value)
         user_ref = db.collection("users").document(uid)
         
-        # Update or create the dpurl field
-        user_ref.set({
+        # Update the dpurl field with new URL
+        user_ref.update({
             "dpurl": dpurl
-        }, merge=True)
+        })
         
-        logger.info(f"Successfully saved dpurl for user {uid}")
+        logger.info(f"Successfully updated dpurl for user {uid}")
 
     except Exception as e:
-        logger.error(f"Failed to save dpurl to Firestore: {e}", exc_info=True)
+        logger.error(f"Failed to update dpurl in Firestore: {e}", exc_info=True)
         # Don't raise exception here - image generation was successful
         # Just log the error and continue
 
